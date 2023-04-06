@@ -1,8 +1,5 @@
 name: 'chatgpt-create-unit-tests'
-description: 'Analyse a Pull Request and adds unit tests if necessary / possible'
-outputs:
-  comment:
-    description: 'A comment'
+description: 'Analyses a Pull Request and adds unit tests if necessary / possible'
 runs:
   using: 'docker'
   image: 'Dockerfile'
