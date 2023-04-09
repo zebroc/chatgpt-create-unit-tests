@@ -26,7 +26,7 @@ func Prompt(p string) (ChatGPTResponse, error) {
 	}
 
 	response, err := executeRequest(openAiBaseURL, openAiToken, &req)
-	usage += response.Usage.TotalTokens
+	usages = append(usages, response.Usage.TotalTokens)
 	return response, err
 }
 
