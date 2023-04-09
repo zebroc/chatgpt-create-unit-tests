@@ -9,17 +9,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
 	githubToken, openAiToken, workspaceDir string
 	repoOwner, repoName, ref               string
-	prNumber                               int
 	usage                                  int
-)
-
-const (
-	patchFileName = "patch"
+	patchFileName                          = "patch"
+	prompts                                = map[string]string{
+		"Unit tests":  "If there are any new functions in this patch, write a unit test for each of them\n\n%s",
+		"Code review": "Please perform a code review for this patch:\n\n%s",
+	}
 )
 
 func main() {
@@ -27,34 +28,41 @@ func main() {
 
 	err := env()
 	if err != nil {
-		fmt.Printf("unable to determine OpenAI token or GitHub token: %v\n", err)
-		os.Exit(1)
+		Exit(fmt.Sprintf("unable to determine OpenAI token or GitHub token: %v\n", err), 1)
 	}
 
 	patch, err := getPatch(workspaceDir + "/" + patchFileName)
 	if err != nil {
-		fmt.Printf("unable to get patch: %s\n", err)
-		os.Exit(2)
+		Exit(fmt.Sprintf("unable to get patch: %s\n", err), 2)
 	}
 
-	p := fmt.Sprintf("If there are any new functions in this patch, "+
-		"write a unit test for each of them\n\n%s", patch)
+	var wg sync.WaitGroup
+	wg.Add(len(prompts))
+	for name, prompt := range prompts {
+		PromptAndComment(patch, name, prompt, &wg)
+	}
+	wg.Wait()
+}
+
+// PromptAndComment executes prompt with patch and creates a comment or logs an error
+func PromptAndComment(patch []byte, name, prompt string, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	p := fmt.Sprintf(prompt, patch)
 	response, err := Prompt(p)
 	if err != nil {
-		fmt.Printf("unable to chat: %s\n", err)
-		os.Exit(3)
+		fmt.Printf("unable to prompt ChatGTP: %s\n", err)
+		return
 	}
 
 	if len(response.Choices) <= 0 || response.Choices[0].Message.Content == "" {
 		fmt.Printf("no or empty response from ChatGPT: %#v\n", response)
-		os.Exit(4)
+		return
 	}
 
-	fmt.Printf("Promt response: %s", response.Choices[0].Message.Content)
+	fmt.Printf("Promt response for %s: %s", name, response.Choices[0].Message.Content)
 
-	x := strings.Split(ref, "/")
-	prNumber, _ = strconv.Atoi(x[2])
-	err = postComment(response.Choices[0].Message.Content, repoOwner, repoName, prNumber)
+	err = postComment(response.Choices[0].Message.Content, repoOwner, repoName)
 	if err != nil {
 		fmt.Printf("unable to post comment: %v\n", err)
 	}
@@ -77,7 +85,13 @@ func getPatch(f string) ([]byte, error) {
 }
 
 // postComment posts c as a comment on PR prNumber or returns an error
-func postComment(c, repoOwner, repo string, prNumber int) error {
+func postComment(c, repoOwner, repo string) error {
+	x := strings.Split(ref, "/")
+	prNumber, err := strconv.Atoi(x[2])
+	if err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	ts := oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: githubToken},
@@ -89,7 +103,7 @@ func postComment(c, repoOwner, repo string, prNumber int) error {
 		Body: github.String(c),
 	}
 
-	comment, _, err := client.Issues.CreateComment(ctx, repoOwner, repo, prNumber, comment)
+	comment, _, err = client.Issues.CreateComment(ctx, repoOwner, repo, prNumber, comment)
 	if err != nil {
 		return err
 	}
@@ -117,4 +131,9 @@ func env() error {
 	}
 
 	return nil
+}
+
+func Exit(m string, i int) {
+	fmt.Print(m)
+	os.Exit(i)
 }
