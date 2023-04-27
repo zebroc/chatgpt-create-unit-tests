@@ -107,12 +107,10 @@ func getPatch() ([]byte, error) {
 			return patchFromWorkspace, nil
 		}
 	case errWS != nil && errFS == nil:
-		fmt.Printf("problem getting patch from workspace, fallback to filesystem: %s\n", errWS)
+		DebugPrint("problem getting patch from workspace, fallback to filesystem: %s\n", errWS)
 		return patchFromFS, nil
 	case errWS == nil && errFS != nil:
-		fmt.Printf("")
-		fmt.Printf("problem getting patch from filesystem, fallback to workspace: %s\nPatch from filesystem:\n%s\n",
-			errFS, patchFromFS)
+		DebugPrint("problem getting patch from filesystem, fallback to workspace: %s\n", errFS)
 		return patchFromWorkspace, nil
 	case errWS != nil && errFS != nil:
 		return nil, errors.Join(errWS, errFS)
