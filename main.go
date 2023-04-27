@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/go-github/v51/github"
@@ -21,8 +22,10 @@ var (
 	repoOwner, repoName, ref, base, head   string
 	usages                                 []int
 	patchFileName                          = "patch"
+	maxPatchSize                           = 10000
 	prompts                                = map[string]string{
-		"Unit tests":         "If there are any new functions in this patch, write a unit test for each of them\n\n%s",
+		"Unit tests": "If there are any new functions in this patch that do not already have a unit test, " +
+			"write a unit test for each of them\n\n%s",
 		"Code review":        "Please perform a code review for this patch:\n\n%s",
 		"Scalability review": "Review the given patch for potential scalability issues:\n\n%s",
 		"Security review":    "Review the given patch for potential security issues:\n\n%s",
@@ -42,6 +45,11 @@ func main() {
 	if err != nil {
 		_ = postComment(fmt.Sprintf("unable to get patch: %s\n", err), repoOwner, repoName, ref)
 		Exit(fmt.Sprintf("unable to get patch: %s\n", err), 2)
+	}
+
+	if len(patch) > maxPatchSize {
+		_ = postComment(fmt.Sprintf("Size of patch (%d) too big, unable to prompt OpenAI. Consider splitting the PR\n", len(patch)), repoOwner, repoName, ref)
+		Exit(fmt.Sprintf("Size of patch (%d) too big, unable to prompt OpenAI. Consider splitting the PR\n", len(patch)), 2)
 	}
 
 	var wg sync.WaitGroup
@@ -189,7 +197,26 @@ func env() error {
 	base = os.Getenv("GITHUB_BASE_REF")
 	head = os.Getenv("GITHUB_HEAD_REF")
 	workspaceDir = os.Getenv("GITHUB_WORKSPACE")
-	debug = os.Getenv("DEBUG") != ""
+
+	// Debug?
+	if os.Getenv("DEBUG") != "" || os.Getenv("INPUT_DEBUG") != "false" {
+		debug = true
+	}
+
+	if size, ok := os.LookupEnv("INPUT_MAXPATCHSIZE"); ok {
+		if i, err := strconv.Atoi(size); err == nil && i > 0 {
+			maxPatchSize = i
+		}
+	}
+
+	// See if there are custom prompts
+	if x, ok := os.LookupEnv("INPUT_PROMPTS"); ok {
+		var p map[string]string
+		err := json.Unmarshal([]byte(x), &p)
+		if err == nil && len(p) > 0 {
+			prompts = p
+		}
+	}
 
 	if x := strings.Split(os.Getenv("GITHUB_REPOSITORY"), "/"); len(x) == 2 {
 		repoOwner = x[0]

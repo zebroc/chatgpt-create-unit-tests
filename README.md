@@ -37,7 +37,7 @@ To allow the comment on PRs, you need to go to Settings --> Actions --> General 
 and select the option "Read and write permissions". This action will not fail if you don't do this, but
 no commenting will happen.
 
-If you want more putput, you can set a DEBUG environment variable, like so:
+If you want more output, you can set a DEBUG environment variable, like so:
 
 ```
 …
@@ -49,3 +49,19 @@ If you want more putput, you can set a DEBUG environment variable, like so:
         DEBUG: true
 ```
 
+## Inputs
+
+### Custom prompts
+
+You can use inputs to provide the prompts that you want to use. They go into the "prompts" input in the form of a JSON
+object which is marshalled into a map[string]string, example: 
+
+```json
+{"codereview":"Please do a code review for this patch:\n\n%s","security":"Are there any security issues this patch:\n\n%s"}
+```
+
+A prompt has exactly one placeholder (the %s). That is the content of the patch / diff.
+
+### Max patch size
+
+Only ask ChatGPT if your patch is below this size: Serves both as a reminder to keep PRs small and also limits requests to ChatGPT that are too large anyways.

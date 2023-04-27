@@ -37,19 +37,19 @@ func executeRequest(u, t string, r *ChatGPTRequest) (ChatGPTResponse, error) {
 	req, err := http.NewRequest("POST", u+"/chat/completions",
 		bytes.NewBuffer(r.JSON()))
 	if err != nil {
-		return response, fmt.Errorf("error creating request: %v", err)
+		return ChatGPTResponse{}, fmt.Errorf("error creating request: %v", err)
 	}
 
 	req.Header.Add("Authorization", "Bearer "+t)
 	req.Header.Add("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return response, fmt.Errorf("error doing request: %v", err)
+		return ChatGPTResponse{}, fmt.Errorf("error doing request: %v", err)
 	}
 
 	var data []byte
 	if data, err = io.ReadAll(resp.Body); err != nil {
-		return response, fmt.Errorf("error receicing data: %v", err)
+		return ChatGPTResponse{}, fmt.Errorf("error receiving data: %v", err)
 	}
 
 	err = json.Unmarshal(data, &response)
@@ -58,7 +58,14 @@ func executeRequest(u, t string, r *ChatGPTRequest) (ChatGPTResponse, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 300 {
-		return response, fmt.Errorf("error doing request: %d\n%s", resp.StatusCode, data)
+		var chatGPTError ChatGPTError
+		_ = json.Unmarshal(data, &chatGPTError)
+		if chatGPTError.Message != "" {
+			return ChatGPTResponse{}, fmt.Errorf("request error. HTTP Status code: %d\n%q",
+				resp.StatusCode, chatGPTError.Message)
+		}
+		return ChatGPTResponse{}, fmt.Errorf("request error. HTTP Status code: %d\n%s",
+			resp.StatusCode, data)
 	}
 
 	if resp.Body != nil {
@@ -97,6 +104,13 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+}
+
+type ChatGPTError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Param   string `json:"param"`
+	Code    string `json:"code"`
 }
 
 func (r ChatGPTRequest) JSON() []byte {
