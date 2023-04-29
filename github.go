@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/google/go-github/v51/github"
 	"golang.org/x/oauth2"
@@ -53,9 +52,6 @@ func createAndSubmitReview(c, repoOwner, repo, ref string, comments []*github.Dr
 	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(
 		&oauth2.Token{AccessToken: githubToken},
 	)))
-
-	a, _ := json.MarshalIndent(comments, "", "  ")
-	fmt.Printf("%s", string(a))
 
 	reviewReq := &github.PullRequestReviewRequest{
 		Body:     &c,

@@ -28,6 +28,9 @@ var (
 		"Scalability review": "Review the given patch for potential scalability issues:\n\n%s",
 		"Security review":    "Review the given patch for potential security issues:\n\n%s",
 	}
+	reviewPrompts = map[string]string{
+		"Code review": "Given the following patch:\\n\\n%s\\n\\nplease perform a code review and create GitHub Review comments suggesting code changes and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\```suggestion\\nCODE```\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
+	}
 )
 
 func main() {
@@ -52,30 +55,15 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(len(prompts))
+	wg.Add(len(reviewPrompts))
 	for name, prompt := range prompts {
 		PromptAndComment(patch, name, prompt, &wg)
 	}
-	wg.Wait()
 
-	//  TODO Testing
-	err = createAndSubmitReview("Review", repoOwner, repoName, ref, []*github.DraftReviewComment{
-		{
-			Path: github.String("main.go"),
-			Body: github.String("Sum would be a better name\n" +
-				"```suggestion\n" +
-				"func Sum(a, b int) int {\n" +
-				"\treturn a + b" +
-				"\n" +
-				"}\n" +
-				"```"),
-			StartSide: github.String("RIGHT"),
-			Side:      github.String("RIGHT"),
-			StartLine: github.Int(5),
-			Line:      github.Int(8),
-		}})
-	if err != nil {
-		fmt.Printf("problem submitting code review: %s", err)
+	for name, prompt := range reviewPrompts {
+		PromptAndReview(patch, name, prompt, &wg)
 	}
+	wg.Wait()
 }
 
 // PromptAndComment executes prompt with patch and creates a comment or logs an error
@@ -106,6 +94,48 @@ func PromptAndComment(patch []byte, name, prompt string, wg *sync.WaitGroup) {
 	err = postComment(response.Choices[0].Message.Content, repoOwner, repoName, ref)
 	if err != nil {
 		fmt.Printf("unable to post comment: %v\n", err)
+	}
+}
+
+// PromptAndReview executes prompt with patch and creates a code review on the PR or logs an error
+func PromptAndReview(patch []byte, name, prompt string, wg *sync.WaitGroup) {
+	if wg != nil {
+		defer wg.Done()
+	}
+
+	p := fmt.Sprintf(prompt, string(patch))
+	DebugPrint("Pompting: %s", p)
+	response, err := Prompt(p)
+	if err != nil {
+		msg := fmt.Sprintf("unable to prompt ChatGTP: %s\n", err)
+		fmt.Print(msg)
+		_ = postComment(msg, repoOwner, repoName, ref)
+		return
+	}
+
+	if len(response.Choices) <= 0 || response.Choices[0].Message.Content == "" {
+		msg := fmt.Sprintf("no or empty response from ChatGPT: %#v\n", response)
+		fmt.Print(msg)
+		_ = postComment(msg, repoOwner, repoName, ref)
+		return
+	}
+
+	DebugPrint("Promt response for %s: %s", name, response.Choices[0].Message.Content)
+
+	var x []github.DraftReviewComment
+	err = json.Unmarshal([]byte(response.Choices[0].Message.Content), &x)
+	if err != nil {
+		fmt.Printf("problem extracting codereview JSON object: %s\nResponse: %s",
+			err, response.Choices[0].Message.Content)
+	}
+
+	var xp []*github.DraftReviewComment
+	for _, c := range x {
+		xp = append(xp, &c)
+	}
+	err = createAndSubmitReview("Review", repoOwner, repoName, ref, xp)
+	if err != nil {
+		fmt.Printf("problem submitting code review: %s", err)
 	}
 }
 
