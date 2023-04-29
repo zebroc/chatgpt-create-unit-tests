@@ -29,7 +29,7 @@ var (
 		"Security review":    "Review the given patch for potential security issues:\n\n%s",
 	}
 	reviewPrompts = map[string]string{
-		"Code review": "Given the following patch:\\n\\n%s\\n\\nplease perform a code review and create GitHub Review comments suggesting code changes and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\```suggestion\\nCODE```\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
+		"Code review": "Given the following patch:\\n\\n%s\\n\\nplease perform a code review and create GitHub Review comments suggesting code changes and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\\\u0060\\\\u0060\\\\u0060suggestion\\nCODE\\\\u0060\\\\u0060\\\\u0060\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
 	}
 )
 
@@ -91,7 +91,7 @@ func PromptAndComment(patch []byte, name, prompt string, wg *sync.WaitGroup) {
 
 	DebugPrint("Promt response for %s: %s", name, response.Choices[0].Message.Content)
 
-	err = postComment("##"+name+"\n"+response.Choices[0].Message.Content,
+	err = postComment("## "+name+"\n\n"+response.Choices[0].Message.Content,
 		repoOwner, repoName, ref)
 	if err != nil {
 		fmt.Printf("unable to post comment: %v\n", err)
@@ -128,6 +128,7 @@ func PromptAndReview(patch []byte, name, prompt string, wg *sync.WaitGroup) {
 	if err != nil {
 		fmt.Printf("problem extracting codereview JSON object: %s\nResponse: %s",
 			err, response.Choices[0].Message.Content)
+		return
 	}
 
 	var xp []*github.DraftReviewComment
