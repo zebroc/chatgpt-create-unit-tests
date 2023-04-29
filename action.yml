@@ -3,3 +3,17 @@ description: 'Analyses a Pull Request and adds unit tests if necessary / possibl
 runs:
   using: 'docker'
   image: 'Dockerfile'
+inputs:
+  debug:
+    description: 'Flag can be enabled to create more verbose logs'
+    required: false
+    default: 'false'
+  prompts:
+    description: 'The prompts that you want to be sent to OpenAI (JSON object to be marshalled into map[string]string)'
+    required: false
+  reviewprompts:
+    description: 'Prompts that result in code reviews with code suggestions'
+    required: false
+  maxpatchsize:
+    description: 'The maximum size of a patch/diff'
+    required: false

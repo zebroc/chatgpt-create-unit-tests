@@ -1,67 +1,192 @@
 package main
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/google/go-github/v51/github"
-	"golang.org/x/oauth2"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 var (
+	debug                                  bool
 	githubToken, openAiToken, workspaceDir string
-	repoOwner, repoName, ref               string
-	prNumber                               int
-	usage                                  int
-)
-
-const (
-	patchFileName = "patch"
+	repoOwner, repoName, ref, base, head   string
+	usages                                 []int
+	patchFileName                          = "patch"
+	maxPatchSize                           = 10000
+	prompts                                = map[string]string{
+		"Unit tests": "If there are any new functions in this patch that do not already have a unit test, " +
+			"write a unit test for each of them\n\n%s",
+		"Code review":        "Please perform a code review for this patch:\n\n%s",
+		"Scalability review": "Review the given patch for potential scalability issues:\n\n%s",
+		"Security review":    "Review the given patch for potential security issues:\n\n%s",
+	}
+	reviewPrompts = map[string]string{
+		"Unit tests":  "Given the following patch:\\n\\n%s\\n\\nif there are any new functions in this patch that do not already have a unit test for them, then create GitHub Review comments suggesting each unit test as a code change and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\\\u0060\\\\u0060\\\\u0060suggestion\\nUNIT_TEST_CODE\\\\u0060\\\\u0060\\\\u0060\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
+		"Code review": "Given the following patch:\\n\\n%s\\n\\nplease perform a code review and create GitHub Review comments suggesting code changes and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\\\u0060\\\\u0060\\\\u0060suggestion\\nCODE\\\\u0060\\\\u0060\\\\u0060\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
+	}
 )
 
 func main() {
-	defer fmt.Printf("Used %d OpenAI tokens\n", usage)
+	defer printTokenUsage(usages)
 
 	err := env()
 	if err != nil {
-		fmt.Printf("unable to determine OpenAI token or GitHub token: %v\n", err)
-		os.Exit(1)
+		_ = postComment("unable to determine OpenAI token or GitHub token", repoOwner, repoName, ref)
+		Exit(fmt.Sprintf("unable to determine OpenAI token or GitHub token: %v\n", err), 1)
 	}
 
-	patch, err := getPatch(workspaceDir + "/" + patchFileName)
+	patch, err := getPatch()
 	if err != nil {
-		fmt.Printf("unable to get patch: %s\n", err)
-		os.Exit(2)
+		_ = postComment(fmt.Sprintf("unable to get patch: %s\n", err), repoOwner, repoName, ref)
+		Exit(fmt.Sprintf("unable to get patch: %s\n", err), 2)
 	}
 
-	p := fmt.Sprintf("If there are any new functions in this patch, "+
-		"write a unit test for each of them\n\n%s", patch)
+	if len(patch) > maxPatchSize {
+		_ = postComment(fmt.Sprintf("Size of patch (%d) too big, unable to prompt OpenAI. Consider splitting the PR\n", len(patch)), repoOwner, repoName, ref)
+		Exit(fmt.Sprintf("Size of patch (%d) too big, unable to prompt OpenAI. Consider splitting the PR\n", len(patch)), 2)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(len(prompts))
+	wg.Add(len(reviewPrompts))
+	for name, prompt := range prompts {
+		PromptAndComment(patch, name, prompt, &wg)
+	}
+
+	for name, prompt := range reviewPrompts {
+		PromptAndReview(patch, name, prompt, &wg)
+	}
+	wg.Wait()
+}
+
+// PromptAndComment executes prompt with patch and creates a comment or logs an error
+func PromptAndComment(patch []byte, name, prompt string, wg *sync.WaitGroup) {
+	if wg != nil {
+		defer wg.Done()
+	}
+
+	p := fmt.Sprintf(prompt, string(patch))
+	DebugPrint("Pompting: %s", p)
 	response, err := Prompt(p)
 	if err != nil {
-		fmt.Printf("unable to chat: %s\n", err)
-		os.Exit(3)
+		msg := fmt.Sprintf("unable to prompt ChatGTP: %s\n", err)
+		fmt.Print(msg)
+		_ = postComment(msg, repoOwner, repoName, ref)
+		return
 	}
 
 	if len(response.Choices) <= 0 || response.Choices[0].Message.Content == "" {
-		fmt.Printf("no or empty response from ChatGPT: %#v\n", response)
-		os.Exit(4)
+		msg := fmt.Sprintf("no or empty response from ChatGPT: %#v\n", response)
+		fmt.Print(msg)
+		_ = postComment(msg, repoOwner, repoName, ref)
+		return
 	}
 
-	fmt.Printf("Promt response: %s", response.Choices[0].Message.Content)
+	DebugPrint("Promt response for %s: %s", name, response.Choices[0].Message.Content)
 
-	x := strings.Split(ref, "/")
-	prNumber, _ = strconv.Atoi(x[2])
-	err = postComment(response.Choices[0].Message.Content, repoOwner, repoName, prNumber)
+	err = postComment("## "+name+"\n\n"+response.Choices[0].Message.Content,
+		repoOwner, repoName, ref)
 	if err != nil {
 		fmt.Printf("unable to post comment: %v\n", err)
 	}
 }
 
-// getPatch loads the data from file f and returns it or an error
-func getPatch(f string) ([]byte, error) {
+// PromptAndReview executes prompt with patch and creates a code review on the PR or logs an error
+func PromptAndReview(patch []byte, name, prompt string, wg *sync.WaitGroup) {
+	if wg != nil {
+		defer wg.Done()
+	}
+
+	p := fmt.Sprintf(prompt, string(patch))
+	DebugPrint("Pompting: %s", p)
+	response, err := Prompt(p)
+	if err != nil {
+		msg := fmt.Sprintf("unable to prompt ChatGTP: %s\n", err)
+		fmt.Print(msg)
+		_ = postComment(msg, repoOwner, repoName, ref)
+		return
+	}
+
+	if len(response.Choices) <= 0 || response.Choices[0].Message.Content == "" {
+		msg := fmt.Sprintf("no or empty response from ChatGPT: %#v\n", response)
+		fmt.Print(msg)
+		_ = postComment(msg, repoOwner, repoName, ref)
+		return
+	}
+
+	DebugPrint("Promt response for %s: %s", name, response.Choices[0].Message.Content)
+
+	var x []github.DraftReviewComment
+	err = json.Unmarshal([]byte(response.Choices[0].Message.Content), &x)
+	if err != nil {
+		fmt.Printf("problem extracting codereview JSON object: %s\nResponse: %s",
+			err, response.Choices[0].Message.Content)
+		return
+	}
+
+	var xp []*github.DraftReviewComment
+	for _, c := range x {
+		xp = append(xp, &c)
+	}
+	err = createAndSubmitReview("## "+name, repoOwner, repoName, ref, xp)
+	if err != nil {
+		fmt.Printf("problem submitting code review: %s", err)
+	}
+}
+
+// getPatch tries to get a patch handed in via the workspace or from the source code in the container
+// running the action. It returns whatever works out or an error.
+func getPatch() ([]byte, error) {
+	patchFromWorkspace, errWS := getPatchFromWorkspace(workspaceDir + "/" + patchFileName)
+	patchFromFS, errFS := getPatchFromFilesystem(base, head)
+
+	switch {
+	case errWS == nil && errFS == nil:
+		if bytes.Equal(patchFromWorkspace, patchFromFS) {
+			fmt.Printf("patches are equal, using the one provded via workspace\n")
+			return patchFromWorkspace, nil
+		} else {
+			fmt.Printf("patches differ, using the one provded via workspace\n")
+			return patchFromWorkspace, nil
+		}
+	case errWS != nil && errFS == nil:
+		DebugPrint("problem getting patch from workspace, fallback to filesystem: %s\n", errWS)
+		return patchFromFS, nil
+	case errWS == nil && errFS != nil:
+		DebugPrint("problem getting patch from filesystem, fallback to workspace: %s\n", errFS)
+		return patchFromWorkspace, nil
+	case errWS != nil && errFS != nil:
+		return nil, errors.Join(errWS, errFS)
+	default:
+		return nil, errors.New("unknown error getting patch")
+	}
+}
+
+// getPatchFromFilesystem executes "git diff" using b/h as the references to compare
+func getPatchFromFilesystem(b, h string) ([]byte, error) {
+	cmd := exec.Command("git", "diff", b, h)
+	patch, err := cmd.Output()
+	if err != nil {
+		return patch, fmt.Errorf("problem running %s: %w", cmd.String(), err)
+	}
+
+	if len(patch) == 0 {
+		return nil, fmt.Errorf("patch empty")
+	}
+
+	return patch, nil
+}
+
+// getPatchFromWorkspace loads the data from file f and returns it or an error
+func getPatchFromWorkspace(f string) ([]byte, error) {
 	file, err := os.Open(f)
 	if err != nil {
 		return nil, err
@@ -73,28 +198,11 @@ func getPatch(f string) ([]byte, error) {
 		return nil, err
 	}
 
+	if len(patch) == 0 {
+		return nil, fmt.Errorf("patch empty")
+	}
+
 	return patch, nil
-}
-
-// postComment posts c as a comment on PR prNumber or returns an error
-func postComment(c, repoOwner, repo string, prNumber int) error {
-	ctx := context.Background()
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: githubToken},
-	)
-	tc := oauth2.NewClient(ctx, ts)
-	client := github.NewClient(tc)
-
-	comment := &github.IssueComment{
-		Body: github.String(c),
-	}
-
-	comment, _, err := client.Issues.CreateComment(ctx, repoOwner, repo, prNumber, comment)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // env sets some variables from the environment and returns an error if required variables aren't set
@@ -102,18 +210,47 @@ func env() error {
 	githubToken = os.Getenv("GITHUB_TOKEN")
 	openAiToken = os.Getenv("OPENAI_TOKEN")
 
+	if githubToken == "" || openAiToken == "" {
+		return fmt.Errorf("you need to set both GITHUB_TOKEN and OPENAI_TOKEN")
+	}
+
 	ref = os.Getenv("GITHUB_REF")
+	base = os.Getenv("GITHUB_BASE_REF")
+	head = os.Getenv("GITHUB_HEAD_REF")
 	workspaceDir = os.Getenv("GITHUB_WORKSPACE")
+
+	// Debug?
+	if os.Getenv("DEBUG") != "" || os.Getenv("INPUT_DEBUG") != "false" {
+		debug = true
+	}
+
+	if size, ok := os.LookupEnv("INPUT_MAXPATCHSIZE"); ok {
+		if i, err := strconv.Atoi(size); err == nil && i > 0 {
+			maxPatchSize = i
+		}
+	}
+
+	// See if there are custom prompts
+	if x, ok := os.LookupEnv("INPUT_PROMPTS"); ok {
+		var p map[string]string
+		err := json.Unmarshal([]byte(x), &p)
+		if err == nil && len(p) > 0 {
+			prompts = p
+		}
+	}
+	if x, ok := os.LookupEnv("INPUT_REVIEWPROMPTS"); ok {
+		var p map[string]string
+		err := json.Unmarshal([]byte(x), &p)
+		if err == nil && len(p) > 0 {
+			reviewPrompts = p
+		}
+	}
 
 	if x := strings.Split(os.Getenv("GITHUB_REPOSITORY"), "/"); len(x) == 2 {
 		repoOwner = x[0]
 		repoName = x[1]
 	} else {
 		return fmt.Errorf("GITHUB_REPOSITORY was in wrong format: %s", os.Getenv("GITHUB_REPOSITORY"))
-	}
-
-	if githubToken == "" || openAiToken == "" {
-		return fmt.Errorf("you need to set both GITHUB_TOKEN and OPENAI_TOKEN")
 	}
 
 	return nil
