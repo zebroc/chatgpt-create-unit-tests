@@ -55,6 +55,7 @@ func createAndSubmitReview(c, repoOwner, repo, ref string, comments []*github.Dr
 
 	reviewReq := &github.PullRequestReviewRequest{
 		Body:     &c,
+		Event:    github.String("REQUEST_CHANGES"),
 		Comments: comments,
 	}
 

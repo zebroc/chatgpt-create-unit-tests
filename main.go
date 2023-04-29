@@ -68,10 +68,10 @@ func main() {
 				"\n" +
 				"}\n" +
 				"```"),
-			StartSide: github.String("LEFT"),
-			Side:      github.String("LEFT"),
-			StartLine: github.Int(9),
-			Line:      github.Int(11),
+			StartSide: github.String("RIGHT"),
+			Side:      github.String("RIGHT"),
+			StartLine: github.Int(5),
+			Line:      github.Int(8),
 		}})
 	if err != nil {
 		fmt.Printf("problem submitting code review: %s", err)
