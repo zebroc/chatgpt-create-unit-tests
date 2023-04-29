@@ -29,6 +29,7 @@ var (
 		"Security review":    "Review the given patch for potential security issues:\n\n%s",
 	}
 	reviewPrompts = map[string]string{
+		"Unit tests":  "Given the following patch:\\n\\n%s\\n\\nif there are any new functions in this patch that do not already have a unit test for them, then create GitHub Review comments suggesting each unit test as a code change and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\\\u0060\\\\u0060\\\\u0060suggestion\\nCODE\\\\u0060\\\\u0060\\\\u0060\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
 		"Code review": "Given the following patch:\\n\\n%s\\n\\nplease perform a code review and create GitHub Review comments suggesting code changes and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\\\u0060\\\\u0060\\\\u0060suggestion\\nCODE\\\\u0060\\\\u0060\\\\u0060\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array.",
 	}
 )
@@ -235,6 +236,13 @@ func env() error {
 		err := json.Unmarshal([]byte(x), &p)
 		if err == nil && len(p) > 0 {
 			prompts = p
+		}
+	}
+	if x, ok := os.LookupEnv("INPUT_REVIEWPROMPTS"); ok {
+		var p map[string]string
+		err := json.Unmarshal([]byte(x), &p)
+		if err == nil && len(p) > 0 {
+			reviewPrompts = p
 		}
 	}
 

@@ -11,8 +11,9 @@ inputs:
   prompts:
     description: 'The prompts that you want to be sent to OpenAI (JSON object to be marshalled into map[string]string)'
     required: false
-    default: '{"codereview":"Please do a code review for this patch:\n\n%s","security":"Are there any security issues this patch:\n\n%s"}'
+  reviewprompts:
+    description: 'Prompts that result in code reviews with code suggestions'
+    required: false
   maxpatchsize:
     description: 'The maximum size of a patch/diff'
     required: false
-    default: '10000'

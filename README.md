@@ -91,6 +91,16 @@ object which is marshalled into a map[string]string, example:
 }
 ```
 
+### Custom review prompts
+
+Review prompts must be written a little differently, as they produce a JSON output which is programmatically used and adds code reviews to the PR which makes it easier to apply suggestions from ChatGPT
+
+```json
+{
+  "Code review": "Given the following patch:\\n\\n%s\\n\\nplease perform a code review and create GitHub Review comments suggesting code changes and fill each one into a JSON object like: { \"path\": \"\", \"body\": \"FILL IN SUGGESTION\\n\\\\u0060\\\\u0060\\\\u0060suggestion\\nCODE\\\\u0060\\\\u0060\\\\u0060\", \"start_side\": \"RIGHT\", \"side\": \"RIGHT\", \"start_line\":  STARTING_LINE, \"line\": ENDING_LINE } and then return just those objects in an array."
+}
+```
+
 A prompt has exactly one placeholder (the %s). That is the content of the patch / diff.
 
 ### Max patch size
