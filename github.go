@@ -57,13 +57,15 @@ func createAndSubmitReview(c, repoOwner, repo, ref string, comments []*github.Dr
 		Comments: comments,
 	}
 
-	review, _, err := client.PullRequests.CreateReview(ctx, repoOwner, repo, prNumber, reviewReq)
+	review, resp, err := client.PullRequests.CreateReview(ctx, repoOwner, repo, prNumber, reviewReq)
 	if err != nil {
+		fmt.Printf("problem creating code review: %s\nBody: %s", err, resp.Body)
 		return err
 	}
 
-	submittedReview, _, err := client.PullRequests.SubmitReview(ctx, repoOwner, repo, prNumber, *review.ID, reviewReq)
+	submittedReview, resp, err := client.PullRequests.SubmitReview(ctx, repoOwner, repo, prNumber, *review.ID, reviewReq)
 	if err != nil {
+		fmt.Printf("problem submitting code review: %s\nBody: %s", err, resp.Body)
 		return err
 	}
 
