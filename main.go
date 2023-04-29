@@ -91,7 +91,8 @@ func PromptAndComment(patch []byte, name, prompt string, wg *sync.WaitGroup) {
 
 	DebugPrint("Promt response for %s: %s", name, response.Choices[0].Message.Content)
 
-	err = postComment(response.Choices[0].Message.Content, repoOwner, repoName, ref)
+	err = postComment("##"+name+"\n"+response.Choices[0].Message.Content,
+		repoOwner, repoName, ref)
 	if err != nil {
 		fmt.Printf("unable to post comment: %v\n", err)
 	}
