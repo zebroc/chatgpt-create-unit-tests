@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/google/go-github/v51/github"
-	"golang.org/x/oauth2"
 	"io"
 	"os"
 	"os/exec"
@@ -58,6 +56,26 @@ func main() {
 		PromptAndComment(patch, name, prompt, &wg)
 	}
 	wg.Wait()
+
+	//  TODO Testing
+	err = createAndSubmitReview("Review", repoOwner, repoName, ref, []*github.DraftReviewComment{
+		{
+			Path: github.String("/main.go"),
+			Body: github.String("Sum would be a better name\n" +
+				"```suggestion\n" +
+				"func Sum(a, b int) int {\n" +
+				"\treturn a + b" +
+				"\n" +
+				"}\n" +
+				"```"),
+			StartSide: github.String("LEFT"),
+			Side:      github.String("LEFT"),
+			StartLine: github.Int(9),
+			Line:      github.Int(11),
+		}})
+	if err != nil {
+		fmt.Printf("problem submitting code review: %s", err)
+	}
 }
 
 // PromptAndComment executes prompt with patch and creates a comment or logs an error
@@ -152,34 +170,6 @@ func getPatchFromWorkspace(f string) ([]byte, error) {
 	}
 
 	return patch, nil
-}
-
-// postComment posts c as a comment on PR prNumber which is extracted from ref or returns an error
-func postComment(c, repoOwner, repo, ref string) error {
-	x := strings.Split(ref, "/")
-	if len(x) < 3 {
-		return fmt.Errorf("unable to extract PR number from ref %q", ref)
-	}
-	prNumber, err := strconv.Atoi(x[2])
-	if err != nil {
-		return err
-	}
-
-	ctx := context.Background()
-	client := github.NewClient(oauth2.NewClient(ctx, oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: githubToken},
-	)))
-
-	comment := &github.IssueComment{
-		Body: github.String(c),
-	}
-
-	comment, _, err = client.Issues.CreateComment(ctx, repoOwner, repo, prNumber, comment)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // env sets some variables from the environment and returns an error if required variables aren't set
