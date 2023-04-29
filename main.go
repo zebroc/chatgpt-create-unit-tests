@@ -60,7 +60,7 @@ func main() {
 	//  TODO Testing
 	err = createAndSubmitReview("Review", repoOwner, repoName, ref, []*github.DraftReviewComment{
 		{
-			Path: github.String("/main.go"),
+			Path: github.String("main.go"),
 			Body: github.String("Sum would be a better name\n" +
 				"```suggestion\n" +
 				"func Sum(a, b int) int {\n" +

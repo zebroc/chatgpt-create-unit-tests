@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/google/go-github/v51/github"
 	"golang.org/x/oauth2"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -59,13 +60,21 @@ func createAndSubmitReview(c, repoOwner, repo, ref string, comments []*github.Dr
 
 	review, resp, err := client.PullRequests.CreateReview(ctx, repoOwner, repo, prNumber, reviewReq)
 	if err != nil {
-		fmt.Printf("problem creating code review: %s\nBody: %s", err, resp.Body)
+		body, exx := io.ReadAll(resp.Body)
+		if exx != nil {
+			fmt.Printf("problem reading body: %s", err)
+		}
+		fmt.Printf("problem creating code review: %s\nBody: %s", err, body)
 		return err
 	}
 
 	submittedReview, resp, err := client.PullRequests.SubmitReview(ctx, repoOwner, repo, prNumber, *review.ID, reviewReq)
 	if err != nil {
-		fmt.Printf("problem submitting code review: %s\nBody: %s", err, resp.Body)
+		body, exx := io.ReadAll(resp.Body)
+		if exx != nil {
+			fmt.Printf("problem reading body: %s", err)
+		}
+		fmt.Printf("problem submitting code review: %s\nBody: %s", err, body)
 		return err
 	}
 
